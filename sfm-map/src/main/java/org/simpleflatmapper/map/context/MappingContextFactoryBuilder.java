@@ -277,6 +277,14 @@ public class MappingContextFactoryBuilder<S, K> implements ContextFactoryBuilder
     public boolean hasChildren() {
         return children.isEmpty();
     }
+    
+    public PropertyMeta<?, ?> getOwner() {
+		return owner;
+	}
+    
+    public MappingContextFactoryBuilder<S, K> getParent() {
+		return parent;
+	}
 
     private static class Counter {
         int value;

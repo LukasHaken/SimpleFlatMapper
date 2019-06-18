@@ -9,6 +9,7 @@ import org.simpleflatmapper.map.MappingContext;
 import org.simpleflatmapper.map.SourceFieldMapper;
 import org.simpleflatmapper.map.context.MappingContextFactory;
 import org.simpleflatmapper.map.context.MappingContextFactoryBuilder;
+import org.simpleflatmapper.map.getter.DiscriminatorResultSetGetter;
 import org.simpleflatmapper.map.impl.DiscriminatorPropertyFinder;
 import org.simpleflatmapper.map.property.OptionalProperty;
 import org.simpleflatmapper.reflect.BiInstantiator;
@@ -16,6 +17,7 @@ import org.simpleflatmapper.reflect.Getter;
 import org.simpleflatmapper.reflect.meta.ClassMeta;
 import org.simpleflatmapper.reflect.meta.PropertyFinder;
 import org.simpleflatmapper.reflect.meta.PropertyMeta;
+import org.simpleflatmapper.reflect.meta.SubPropertyMeta;
 import org.simpleflatmapper.util.BiConsumer;
 import org.simpleflatmapper.util.EqualsPredicate;
 import org.simpleflatmapper.util.ForEachCallBack;
@@ -23,6 +25,7 @@ import org.simpleflatmapper.util.Predicate;
 import org.simpleflatmapper.util.TypeHelper;
 
 import java.lang.reflect.Type;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -162,7 +165,7 @@ public class DiscriminatorConstantSourceMapperBuilder<S, T, K extends FieldKey<K
         boolean oneColumn = isOneColumn(predicatedInstantiator);
         BiInstantiator<S, MappingContext<? super S>,  GenericBuilder<S, T>> gbi =
                 oneColumn ? 
-                        new OneColumnBuildBiInstantiator<S, T>(predicatedInstantiator) :        
+                        new OneColumnBuildBiInstantiator<S, T>(predicatedInstantiator, createSubProperty(mappingContextFactoryBuilder)) :        
                     new GenericBuildBiInstantiator<S, T>(predicatedInstantiator);
 
         DiscriminatorGenericBuilderMapper<S, T> mapper = new DiscriminatorGenericBuilderMapper<S, T>(gbi);
@@ -173,6 +176,13 @@ public class DiscriminatorConstantSourceMapperBuilder<S, T, K extends FieldKey<K
         return new TransformSourceFieldMapper<S, GenericBuilder<S, T>, T>(mapper, targetFieldMappers, GenericBuilder.<S, T>buildFunction());
     }
 
+	private PropertyMeta<?, ?> createSubProperty(MappingContextFactoryBuilder mappingContextFactoryBuilder){
+        if (mappingContextFactoryBuilder.getParent().getOwner() != null) {
+            return new SubPropertyMeta<>(mappingContextFactoryBuilder.getOwner().getReflectService(), createSubProperty(mappingContextFactoryBuilder.getParent()), mappingContextFactoryBuilder.getOwner());
+        }
+        return mappingContextFactoryBuilder.getOwner();
+	}
+    
     private boolean isOneColumn(PredicatedInstantiator<S, T>[] predicatedInstantiator) {
         
         Getter getter = null;
@@ -243,8 +253,9 @@ public class DiscriminatorConstantSourceMapperBuilder<S, T, K extends FieldKey<K
     private static class OneColumnBuildBiInstantiator<S, T> implements BiInstantiator<S, MappingContext<? super S>, GenericBuilder<S, T>> {
         private final Getter<S, ?> getter;
         private final Map<Object, BiInstantiator<S, MappingContext<? super S>, GenericBuilder<S, T>>> instantiators;
-
-        public OneColumnBuildBiInstantiator(PredicatedInstantiator<S, T>[] predicatedInstantiators) {
+        private final PropertyMeta<?, ?> owner;
+        
+        public OneColumnBuildBiInstantiator(PredicatedInstantiator<S, T>[] predicatedInstantiators,	PropertyMeta<?, ?> owner) {
             if (predicatedInstantiators == null || predicatedInstantiators.length == 0) throw new IllegalArgumentException("predicatedInstantiators is null or empty");
             getter = ((AbstractMapperFactory.DiscriminatorConditionBuilder.SourcePredicate)predicatedInstantiators[0].predicate).getter;
             
@@ -254,12 +265,18 @@ public class DiscriminatorConstantSourceMapperBuilder<S, T, K extends FieldKey<K
                 EqualsPredicate ep = (EqualsPredicate) ((AbstractMapperFactory.DiscriminatorConditionBuilder.SourcePredicate)pi.predicate).predicate;
                 instantiators.put(ep.expected, pi.instantiator);
             }
+            this.owner = owner;
         }
 
         @SuppressWarnings("unchecked")
         @Override
         public GenericBuilder<S, T> newInstance(S o, MappingContext<? super S> o2) throws Exception {
-            Object value = getter.get(o);
+            Object value;
+            if (getter instanceof DiscriminatorResultSetGetter) {
+                value = ((DiscriminatorResultSetGetter) getter).get((ResultSet) o, owner);
+            } else {
+                value = getter.get(o);
+            }
             
             BiInstantiator<S, MappingContext<? super S>, GenericBuilder<S, T>> instantiator = instantiators.get(value);
             
